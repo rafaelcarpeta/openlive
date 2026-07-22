@@ -257,7 +257,9 @@ function loadWindowState() {
   return null;
 }
 function saveWindowState() {
-  if (!mainWin || mainWin.isAlwaysOnTop()) return; // don't persist the floating-mini rect
+  // Skip the floating-mini rect AND fullscreen bounds — persisting either would
+  // reopen the window mini-sized or screen-filling instead of at its real size.
+  if (!mainWin || mainWin.isAlwaysOnTop() || mainWin.isFullScreen()) return;
   try { fs.writeFileSync(stateFile(), JSON.stringify(mainWin.getBounds())); } catch { /* best-effort */ }
 }
 
@@ -278,13 +280,16 @@ function createMainWindow() {
     width: saved?.width || 1180, height: saved?.height || 800, minWidth: 940, minHeight: 640,
     ...(saved && saved.x != null ? { x: saved.x, y: saved.y } : {}),
     show: false,
-    // Frameless + OPAQUE. We draw our own window controls (WindowControls.tsx) and
-    // drag strip in CSS. NOT transparent: transparent windows take a slower macOS
-    // compositing path that competes with the on-device WebGPU voice models (adds
-    // turn latency) and rendered as a black wall on some GPUs. Mini mode hides this
-    // window (renderer keeps running the voice pipeline) and shows the separate
-    // panel window below. macOS rounds the frameless window natively (roundedCorners).
-    frame: false,
+    // OPAQUE (never transparent): transparent windows take a slower macOS compositing
+    // path that competes with the on-device WebGPU voice models (adds turn latency) and
+    // render as a black wall on some GPUs. Mini mode hides this window (renderer keeps
+    // running the voice pipeline) and shows the separate panel window below.
+    // macOS: titleBarStyle "hidden" keeps the NATIVE traffic lights (positioned to match
+    // the old custom dots) AND real OS fullscreen — a fully frameless window degrades the
+    // green button to a maximize. Win/Linux stay frameless with our own controls.
+    ...(process.platform === "darwin"
+      ? { titleBarStyle: "hidden", trafficLightPosition: { x: 12, y: 14 } }
+      : { frame: false }),
     roundedCorners: true,
     backgroundColor: DARK_BG,
     webPreferences: {
