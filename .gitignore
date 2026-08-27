@@ -19,3 +19,6 @@ apps/desktop/dist/
 
 # vendored voice runtime assets (copied from node_modules by copy-voice-assets.mjs)
 apps/web/public/vad/
+
+assets/milestone-200.png
+assets/milestone-200.svg

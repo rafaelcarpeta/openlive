@@ -4,6 +4,18 @@ All notable changes to OpenLive are recorded here. The newest version is on top.
 Releases before 0.1.9 predate this file — see the
 [GitHub releases](https://github.com/katipally/openlive/releases) for those.
 
+## [0.2.6] - 2026-08-27
+
+### Fixed
+- **Coding agents installed through a Node version manager showed as "Not
+  installed".** OpenLive only looked for agent binaries in a short list of
+  fixed directories, so a `claude` (or any agent) living under nvm, fnm, volta
+  or asdf was invisible whenever the app was launched from Finder or the dock —
+  the Agents settings row offered "Install" for something already installed,
+  and `npx`-based agent adapters could fail to start for the same reason.
+  OpenLive now reads your real login-shell PATH, so agents resolve no matter
+  where they were installed or how the app was started.
+
 ## [0.2.5] - 2026-07-18
 
 ### Added
