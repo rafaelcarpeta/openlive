@@ -9,6 +9,7 @@ const fs = require("node:fs");
 const http = require("node:http");
 const net = require("node:net");
 const crypto = require("node:crypto");
+const os = require("node:os");
 const { powerMonitor } = require("electron");
 
 // Crash early, loud, and visible instead of dying silently.
@@ -86,6 +87,22 @@ function killTree(pid, sig = "SIGTERM") {
   try { process.kill(-pid, sig); } catch { try { process.kill(pid, sig); } catch { /* already gone */ } }
 }
 
+// PIDs listening on `port`. lsof is always there on macOS but is NOT installed on
+// minimal Linux images — and sh() can't tell "no such binary" from "nothing found",
+// so a missing lsof would silently read as "port is free" and skip the cleanup this
+// whole path exists for. ss (iproute2) is the modern default there, so fall back to it on Linux.
+function posixListenerPids(port) {
+  const viaLsof = sh(`lsof -ti tcp:${port} -sTCP:LISTEN`).split("\n").filter(Boolean).map(Number);
+  if (viaLsof.length || process.platform !== "linux") return viaLsof;
+  const pids = [];
+  for (const line of sh("ss -ltnpH").split("\n")) {
+    // state | recv-q | send-q | local:port | peer | users:(("name",pid=N,fd=M))
+    if (!line.trim().split(/\s+/)[3]?.endsWith(`:${port}`)) continue;
+    for (const m of line.matchAll(/pid=(\d+)/g)) pids.push(Number(m[1]));
+  }
+  return pids;
+}
+
 // Who (if anyone) is LISTENING on `port`, and is it one of ours? "Ours" = a process
 // running our own binary (prod servers run via ELECTRON_RUN_AS_NODE = our exe), so a
 // leftover is safe to kill; anything else is a foreign app we must not touch.
@@ -101,8 +118,8 @@ function portHolder(port) {
     }
     return null;
   }
-  for (const p of sh(`lsof -ti tcp:${port} -sTCP:LISTEN`).split("\n").filter(Boolean)) {
-    const pid = Number(p); if (!pid || pid === process.pid) continue;
+  for (const pid of posixListenerPids(port)) {
+    if (!pid || pid === process.pid) continue;
     const comm = sh(`ps -p ${pid} -o comm=`).trim();
     return { pid, name: path.basename(comm), ours: comm.toLowerCase().includes(mine) };
   }
@@ -525,6 +542,32 @@ function wireMiniIpc() {
   ipcMain.on("openlive:panel-cmd", (_e, c) => { if (mainWin) mainWin.webContents.send("openlive:panel-cmd", c); });
 }
 
+// ── launch at login ──────────────────────────────────────────────────────────
+// Electron's setLoginItemSettings is darwin/win32 only (its own typings say so), so
+// on Linux the Settings toggle silently did nothing and always read back off. Linux
+// autostart is a .desktop file in ~/.config/autostart. Exec must be the AppImage the
+// user launched, not the unpacked binary inside it — APPIMAGE holds that path.
+const AUTOSTART_FILE = path.join(os.homedir(), ".config", "autostart", "openlive.desktop");
+function loginItem(enable) {
+  if (process.platform !== "linux") {
+    if (typeof enable === "boolean") app.setLoginItemSettings({ openAtLogin: enable });
+    return app.getLoginItemSettings().openAtLogin;
+  }
+  try {
+    if (typeof enable === "boolean") {
+      if (enable) {
+        fs.mkdirSync(path.dirname(AUTOSTART_FILE), { recursive: true });
+        const exec = process.env.APPIMAGE || process.execPath;
+        fs.writeFileSync(AUTOSTART_FILE,
+          `[Desktop Entry]\nType=Application\nName=OpenLive\nExec="${exec}"\nTerminal=false\nX-GNOME-Autostart-enabled=true\n`);
+      } else {
+        fs.rmSync(AUTOSTART_FILE, { force: true });
+      }
+    }
+    return fs.existsSync(AUTOSTART_FILE);
+  } catch { return false; }
+}
+
 // ── custom window controls (frameless window → no native traffic lights) ─────
 function wireWindowIpc() {
   // Launch-at-login (Settings → General). Invoke with a boolean to set; with
@@ -533,8 +576,8 @@ function wireWindowIpc() {
     // Rebuild the menu: the same switch lives in Settings → General AND the app
     // menu, and the menu's checkbox is captured when it's built — flipping it here
     // left the two disagreeing until the next launch.
-    if (typeof v === "boolean") { app.setLoginItemSettings({ openAtLogin: v }); buildMenu(); }
-    return app.getLoginItemSettings().openAtLogin;
+    if (typeof v === "boolean") { loginItem(v); buildMenu(); }
+    return loginItem();
   });
   ipcMain.on("openlive:win-close", () => { if (mainWin) mainWin.close(); });
   ipcMain.on("openlive:win-min", () => { if (mainWin) mainWin.minimize(); });
@@ -614,8 +657,8 @@ function buildMenu() {
       { label: "Check for Updates…", click: checkForUpdatesNow },
       { type: "separator" },
       { label: "Settings…", accelerator: "CmdOrCtrl+,", click: openSettings },
-      { label: "Open at Login", type: "checkbox", checked: app.getLoginItemSettings().openAtLogin,
-        click: (mi) => app.setLoginItemSettings({ openAtLogin: mi.checked }) },
+      { label: "Open at Login", type: "checkbox", checked: loginItem(),
+        click: (mi) => loginItem(mi.checked) },
       { type: "separator" },
       { role: "hide" }, { role: "hideOthers" }, { role: "unhide" },
       { type: "separator" }, { role: "quit" },

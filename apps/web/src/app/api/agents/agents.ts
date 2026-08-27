@@ -12,7 +12,8 @@ export const agentById = (id: string): AgentDef | undefined => (isAgentId(id) ? 
 
 // The command to run for an action. npm/shell installs are non-interactive
 // (streamed inline); login/logout and terminal-flavored installs (hermes'
-// wizard) open the user's terminal (Terminal.app on macOS, cmd on Windows).
+// wizard) open the user's terminal (Terminal.app, PowerShell, or the first Linux
+// emulator on PATH — see terminalCommand).
 // EACCES on global npm installs gets actionable guidance appended to the
 // stream (see action/route.ts). "update" reruns the install recipe — npm
 // pins @latest explicitly; the curl scripts always fetch the latest anyway.

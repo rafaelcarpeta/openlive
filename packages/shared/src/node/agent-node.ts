@@ -113,8 +113,31 @@ export function readJsonHome(path: string): Record<string, unknown> | null {
   } catch { return null; }
 }
 
-/** Launch a CLI command in the user's real terminal (login/logout flows need a
- *  TTY + browser). darwin → Terminal.app; win32 → a new cmd window; else best-effort. */
+/** Is `bin` on the widened PATH? Sync (terminalCommand is), and cheap: a few
+ *  existsSync probes, no spawn. */
+function onPath(bin: string): boolean {
+  return widenedPath().split(delimiter).some((dir) => dir && existsSync(join(dir, bin)));
+}
+
+/** Linux has no single terminal. Each entry is the emulator's binary and the flag
+ *  that means "the rest is the command to run"; kitty and foot take it bare. Order
+ *  is preference: the Debian alternatives alias first, then the desktop defaults. */
+const LINUX_TERMINALS: [string, string[]][] = [
+  ["x-terminal-emulator", ["-e"]],
+  ["gnome-terminal", ["--"]],
+  ["konsole", ["-e"]],
+  ["ptyxis", ["--"]],
+  ["xfce4-terminal", ["-x"]],
+  ["kitty", []],
+  ["alacritty", ["-e"]],
+  ["foot", []],
+  ["xterm", ["-e"]],
+];
+
+/** Launch a CLI command in the user's real terminal — login/logout and setup
+ *  wizards need a TTY and a browser, so this must be a VISIBLE window, never a
+ *  headless shell. darwin → Terminal.app; win32 → a new PowerShell window;
+ *  linux → the first emulator on PATH. */
 export function terminalCommand(cmd: string): { cmd: string; args: string[] } {
   if (process.platform === "darwin") {
     return { cmd: "osascript", args: ["-e", 'tell application "Terminal" to activate', "-e", `tell application "Terminal" to do script "${cmd.replace(/"/g, '\\"')}"`] };
@@ -126,5 +149,9 @@ export function terminalCommand(cmd: string): { cmd: string; args: string[] } {
     // the simple `<cli> login` commands run fine in it too.
     return { cmd: "cmd", args: ["/c", "start", "", "powershell", "-NoExit", "-Command", cmd] };
   }
-  return { cmd: "bash", args: ["-lc", cmd] };
+  // `exec bash` holds the window open after the command, like PowerShell -NoExit.
+  // With no emulator installed the alias still spawns ENOENT, which the caller turns
+  // into "couldn't open a terminal — run this yourself" with the command spelled out.
+  const [term, flags] = LINUX_TERMINALS.find(([bin]) => onPath(bin)) ?? LINUX_TERMINALS[0]!;
+  return { cmd: term, args: [...flags, "bash", "-lc", `${cmd}; exec bash`] };
 }

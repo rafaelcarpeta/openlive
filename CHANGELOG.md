@@ -4,6 +4,26 @@ All notable changes to OpenLive are recorded here. The newest version is on top.
 Releases before 0.1.9 predate this file — see the
 [GitHub releases](https://github.com/katipally/openlive/releases) for those.
 
+## [0.2.7] - 2026-08-27
+
+### Fixed
+- **Talking to a local model (Ollama) failed with "No API key for Anthropic".**
+  Picking a local provider was silently discarded — the check asked whether the
+  provider had an API key, and a local one never does — so every turn ran against
+  a keyed default nobody chose. Local providers are now honoured. (#13)
+- **Linux: Sign in / Sign out / setup wizards opened nothing.** They ran in a
+  headless shell with no window and no terminal, so the flow that needs you to
+  type and approve in a browser had nowhere to happen, and it failed quietly.
+  OpenLive now opens whichever terminal you actually have installed, and tells
+  you what to run yourself if you have none.
+- **Linux: "Open at Login" did nothing.** The switch flipped back off every time
+  because the underlying API is macOS/Windows only. Linux now uses a standard
+  autostart entry.
+- **Linux: leftover servers weren't cleaned up on minimal systems.** The check
+  relied on `lsof`, which many distributions don't ship; a missing `lsof` looked
+  identical to "nothing running", so a stale server survived and the next launch
+  hit it. Systems without `lsof` now fall back to `ss`.
+
 ## [0.2.6] - 2026-08-27
 
 ### Fixed

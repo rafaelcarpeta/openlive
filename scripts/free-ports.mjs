@@ -35,7 +35,17 @@ function pidsOnPort(port) {
     }
     return [...pids];
   }
-  return sh(`lsof -ti tcp:${port} -sTCP:LISTEN`).split("\n").filter(Boolean);
+  const viaLsof = sh(`lsof -ti tcp:${port} -sTCP:LISTEN`).split("\n").filter(Boolean);
+  if (viaLsof.length || process.platform !== "linux") return viaLsof;
+  // lsof isn't installed on minimal Linux images, and sh() can't tell that apart
+  // from "nothing listening". ss (iproute2) is the modern default there.
+  const pids = new Set();
+  for (const line of sh("ss -ltnpH").split("\n")) {
+    // state | recv-q | send-q | local:port | peer | users:(("name",pid=N,fd=M))
+    if (!line.trim().split(/\s+/)[3]?.endsWith(`:${port}`)) continue;
+    for (const m of line.matchAll(/pid=(\d+)/g)) pids.add(m[1]);
+  }
+  return [...pids];
 }
 
 // /T on Windows kills the child's tree too (next-server under `next`, etc.).

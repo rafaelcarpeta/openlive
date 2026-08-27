@@ -26,7 +26,9 @@ const terminalHelp = (display?: string) => `
 ⚠ Couldn't open your terminal automatically.
 ${process.platform === "darwin"
   ? "macOS may be blocking automation: System Settings → Privacy & Security → Automation → allow OpenLive to control Terminal."
-  : "Your system blocked launching a terminal window from OpenLive."}
+  : process.platform === "win32"
+    ? "Your system blocked launching a terminal window from OpenLive."
+    : "No terminal emulator was found — install one (e.g. gnome-terminal, konsole, xterm) or just run the command below."}
 ${display ? `Run this yourself in any terminal, then hit Re-check:\n  ${display}\n` : ""}`;
 
 export async function POST(req: Request) {
