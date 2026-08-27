@@ -15,6 +15,12 @@ Releases before 0.1.9 predate this file — see the
   and `npx`-based agent adapters could fail to start for the same reason.
   OpenLive now reads your real login-shell PATH, so agents resolve no matter
   where they were installed or how the app was started.
+- **The window buttons did nothing.** The close / minimize / fullscreen controls
+  sat underneath the draggable title strip, so macOS and Windows handed every
+  click to the window-drag handler instead of the button. macOS now uses its
+  real native traffic lights (which also makes the green button enter true OS
+  fullscreen instead of just growing the window), and on Windows and Linux the
+  controls are no longer covered by the drag strip.
 
 ## [0.2.5] - 2026-07-18
 

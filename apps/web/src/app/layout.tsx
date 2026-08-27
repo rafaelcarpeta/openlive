@@ -20,9 +20,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" suppressHydrationWarning className={`${geistSans.variable} ${geistMono.variable}`}>
       <body className="h-full antialiased">
-        <WindowControls />
         <Providers>{children}</Providers>
         <Toasts />
+        {/* Last in the body on purpose: Chromium builds the window's drag region in
+            DOM order, so any later `-webkit-app-region: drag` header re-covers these
+            controls' no-drag rect and the OS swallows the clicks as window drags. */}
+        <WindowControls />
       </body>
     </html>
   );
