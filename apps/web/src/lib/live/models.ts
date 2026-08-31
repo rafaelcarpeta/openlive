@@ -154,7 +154,7 @@ export function loadModels(onProgress: (p: LoadProgress) => void): Promise<void>
     const tier = deviceTier();
     console.info(`[live] on-device compute: ${tier === "webgpu" ? "WebGPU (fast)" : "WASM/CPU (slow — no navigator.gpu)"}`);
     const cfg = loadPipelineConfig();
-    w.postMessage({ type: "load", device: tier, whisperSize: sttSize(), ttsEngine: cfg.tts.engine, ttsVoice: cfg.tts.voice });
+    w.postMessage({ type: "load", device: tier, whisperSize: sttSize(), language: cfg.stt.language, ttsEngine: cfg.tts.engine, ttsVoice: cfg.tts.voice });
   });
   loading.finally(() => { loading = null; }); // free the guard so a post-reset reload can re-run
   return loading;
@@ -186,10 +186,21 @@ function call<T>(msg: any, transfer?: Transferable[]): Promise<T> {
   });
 }
 
-/** Transcribe a 16 kHz mono utterance → text. */
-export async function stt(audio: Float32Array): Promise<string> {
-  const m = await call<{ text: string }>({ type: "stt", audio });
-  return m.text;
+export type SttResult = { text: string; language?: string };
+
+/** Transcribe a 16 kHz mono utterance → text + detected language (if available).
+ *  `language` override lets callers forward the current PipelineConfig without
+ *  needing a worker reload — "auto" omits the Whisper language pin so the
+ *  pipeline auto-detects. Always uses task: "transcribe". */
+export async function stt(audio: Float32Array, language?: string): Promise<SttResult> {
+  const lang = language ?? loadPipelineConfig().stt.language;
+  const m = await call<{ text: string; language?: string }>({ type: "stt", audio, language: lang });
+  return { text: m.text, language: m.language ? String(m.language).toLowerCase().slice(0, 2) : undefined };
+}
+
+/** Back-compat: transcribe → plain string (drops language). Prefer `stt()` above. */
+export async function sttText(audio: Float32Array, language?: string): Promise<string> {
+  return (await stt(audio, language)).text;
 }
 
 // Cloned-voice synthesis runs in the LOCAL agent service (ZipVoice via

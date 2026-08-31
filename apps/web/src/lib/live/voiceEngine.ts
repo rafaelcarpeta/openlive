@@ -16,8 +16,8 @@ export type EnginePhase = "idle" | "listening" | "thinking" | "speaking";
 
 export interface VoiceEngineHandlers {
   onPhase: (p: EnginePhase) => void;
-  onPartial: (text: string) => void;      // interim user caption (greyed)
-  onUserText: (text: string) => void;      // final user turn → send to server
+  onPartial: (text: string, language?: string) => void;      // interim user caption (greyed); language = detected when auto
+  onUserText: (text: string, language?: string) => void;      // final user turn → send to server; language exposed if pipeline provides it
   onAgentText: (sentence: string, durationMs: number) => void; // agent caption chunk + how long it plays (for word-timed reveal)
   onBargeIn: (spoken: string) => void;      // cancel the LLM stream; `spoken` = what was actually voiced so far
   // A mid-thought pause is being held: `until` = when it auto-sends (UI shows a
@@ -44,6 +44,7 @@ export class VoiceEngine {
 
   private pending: Float32Array | null = null;   // held mid-thought utterance
   private pendingText = "";                        // its transcript, already computed in onSpeechEnd — reused on auto-send instead of re-transcribing
+  private pendingLanguage?: string;                // detected language for the held utterance (exposed to onUserText/onPartial)
   private holdTimer: ReturnType<typeof setTimeout> | null = null;
   private curBuf: Float32Array[] = [];           // frames since speech start (for partials)
   private curLen = 0;
@@ -208,8 +209,9 @@ export class VoiceEngine {
     try {
       const win = this.concat(this.curBuf, this.curLen);
       if (rmsOf(win) < this.gate()) return;
-      const text = await stt(win);
-      if (text && !isJunk(text) && this.phase === "listening") this.h.onPartial(text);
+      const res = await stt(win);
+      const text = res.text;
+      if (text && !isJunk(text) && this.phase === "listening") this.h.onPartial(text, res.language);
     } catch { /* best-effort */ }
     finally { this.partialBusy = false; }
   }
@@ -222,7 +224,7 @@ export class VoiceEngine {
     const combined = this.pending ? this.concat([this.pending, audio], this.pending.length + audio.length) : audio;
     // Reject blips and near-silence up front (ambient noise that tripped the VAD) —
     // but during push-to-talk a blip must not throw away what's already held.
-    if (combined.length < MIN_UTTER_SAMPLES || rmsOf(audio) < this.gate()) { if (!this.ptt) { this.pending = null; this.h.onPartial(""); } if (this.phase === "listening") this.setPhase("idle"); return; }
+    if (combined.length < MIN_UTTER_SAMPLES || rmsOf(audio) < this.gate()) { if (!this.ptt) { this.pending = null; this.pendingLanguage = undefined; this.h.onPartial(""); } if (this.phase === "listening") this.setPhase("idle"); return; }
     this.finalizing = true;
     const perf0 = performance.now();
     try {
@@ -234,15 +236,17 @@ export class VoiceEngine {
       // While push-to-talk is held, no end-of-turn decision at all: just accumulate
       // and caption — release (endPtt) is the one and only turn boundary.
       const useTurnModel = !this.ptt && turnModelReady() && turnCfg.engine !== "silence";
-      const [text, modelComplete] = await Promise.all([
-        stt(combined).then((t) => t.trim()),
+      const [sttRes, modelComplete] = await Promise.all([
+        stt(combined).then((r) => ({ text: r.text.trim(), language: r.language })),
         useTurnModel ? turnComplete(combined, turnCfg.threshold) : Promise.resolve(true),
       ]);
+      const text = sttRes.text;
+      const language = sttRes.language;
       const sttEndpointMs = performance.now() - perf0;
-      if (this.ptt) { this.pending = combined; if (!isJunk(text)) this.h.onPartial(text); this.setPhase("idle"); return; }
+      if (this.ptt) { this.pending = combined; this.pendingLanguage = language; if (!isJunk(text)) this.h.onPartial(text, language); this.setPhase("idle"); return; }
       // Drop empties and Whisper's silence-hallucinations so background noise and
       // dead air never fire a turn.
-      if (isJunk(text)) { this.pending = null; this.h.onPartial(""); this.setPhase("idle"); return; }
+      if (isJunk(text)) { this.pending = null; this.pendingLanguage = undefined; this.h.onPartial(""); this.setPhase("idle"); return; }
       // Hold through a mid-thought pause (model says "not done", or the words
       // trail off) instead of cutting in — but never longer than the configured
       // hold / 20 s.
@@ -250,19 +254,22 @@ export class VoiceEngine {
       if (!done && combined.length < 16000 * 20) {
         this.pending = combined;
         this.pendingText = text;
-        this.h.onPartial(text);
+        this.pendingLanguage = language;
+        this.h.onPartial(text, language);
         this.scheduleHold();
         this.setPhase("idle");
         return;
       }
       this.pending = null;
+      this.pendingLanguage = undefined;
       this.clearHold();
       this.setPhase("thinking");
       this.spokenText = ""; // new turn: clear the previous reply's spoken text
       this.acceptingReply = true; // re-arm: this turn's reply should be voiced
       this.turnSentAt = performance.now();
       perf.turnCommitted(sttEndpointMs);
-      this.h.onUserText(text);
+      if (language) log.info("stt", `detected language: ${language} → "${text.slice(0, 80)}"`);
+      this.h.onUserText(text, language);
     } catch {
       // A stalled/failed inference (now time-limited in models.call) must not strand
       // the turn loop — recover to idle and clear the frozen partial caption.
@@ -288,21 +295,21 @@ export class VoiceEngine {
   /** Send the held mid-thought utterance NOW (hold timer fired, or the user tapped
    *  "send now" / hit Enter instead of waiting it out). */
   private flushPending() {
-    const p = this.pending; const cached = this.pendingText.trim();
-    this.pending = null; this.pendingText = "";
+    const p = this.pending; const cached = this.pendingText.trim(); const cachedLang = this.pendingLanguage;
+    this.pending = null; this.pendingText = ""; this.pendingLanguage = undefined;
     this.clearHold();
     if (!p || this.phase !== "idle") return;
-    const commit = (t: string) => {
+    const commit = (t: string, lang?: string) => {
       const text = t.trim();
-      if (text && !isJunk(text)) { this.setPhase("thinking"); this.spokenText = ""; this.acceptingReply = true; this.turnSentAt = performance.now(); this.h.onUserText(text); }
+      if (text && !isJunk(text)) { this.setPhase("thinking"); this.spokenText = ""; this.acceptingReply = true; this.turnSentAt = performance.now(); this.h.onUserText(text, lang); }
       else this.h.onPartial(""); // held fragment came back empty/junk → clear the caption
     };
     // The held audio was already transcribed in onSpeechEnd (that's how we knew it
     // was mid-thought), so reuse that transcript instead of re-running STT here —
     // the auto-send path was paying for a second transcription. Fall back to STT
     // only if for some reason we don't have the cached text.
-    if (cached) commit(cached);
-    else void stt(p).then(commit).catch(() => this.h.onPartial("")); // stalled/failed STT → don't strand the caption
+    if (cached) commit(cached, cachedLang);
+    else void stt(p).then((r) => commit(r.text, r.language)).catch(() => this.h.onPartial("")); // stalled/failed STT → don't strand the caption
   }
   /** Public "send now": commit a held utterance without waiting for the hold timer. */
   commitPending() { if (this.pending && !this.ptt) this.flushPending(); }
@@ -330,15 +337,17 @@ export class VoiceEngine {
     if (this.muted) void this.vad?.pause(); // the hold is over — restore the mute
     const p = this.pending;
     this.pending = null;
+    this.pendingLanguage = undefined;
     if (!p || p.length < MIN_UTTER_SAMPLES) { this.h.onPartial(""); if (this.phase === "listening") this.setPhase("idle"); return; }
     try {
-      const text = (await stt(p)).trim();
+      const res = await stt(p);
+      const text = res.text.trim();
       if (isJunk(text)) { this.h.onPartial(""); this.setPhase("idle"); return; }
       this.setPhase("thinking");
       this.spokenText = "";
       this.acceptingReply = true;
       this.turnSentAt = performance.now();
-      this.h.onUserText(text);
+      this.h.onUserText(text, res.language);
     } catch { this.h.onPartial(""); this.setPhase("idle"); }
   }
   pttActive() { return this.ptt; }

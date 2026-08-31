@@ -197,7 +197,8 @@ function Recorder({ onSaved }: { onSaved: () => void }) {
         const ratio = sampleRate / 16000; // Whisper expects 16 kHz — cheap linear resample
         const out = new Float32Array(Math.floor(capped.length / ratio));
         for (let i = 0; i < out.length; i++) out[i] = capped[Math.floor(i * ratio)]!;
-        const text = await stt(out);
+        const res = await stt(out);
+        const text = res.text;
         if (text.trim()) setTranscript(text.trim());
       } catch (e) { log.error("voice", "reference transcribe:", e); }
       finally { setBusy(null); }

@@ -7,19 +7,21 @@
 
 export type WhisperSize = "tiny" | "base" | "small" | "large-v3-turbo";
 export const WHISPER_SIZE_IDS: readonly WhisperSize[] = ["tiny", "base", "small", "large-v3-turbo"];
+export type WhisperLanguage = "auto" | "pt" | "en" | "es" | "fr" | "de" | "it" | "ja" | "ko" | "zh" | "ru" | "ar" | "hi";
+export const WHISPER_LANGUAGE_IDS: readonly WhisperLanguage[] = ["auto", "pt", "en", "es", "fr", "de", "it", "ja", "ko", "zh", "ru", "ar", "hi"];
 export type TurnEngine = "smart-turn" | "silence";
 export type TtsEngine = "kokoro" | "supertonic" | "clone";
 export const TTS_ENGINE_IDS: readonly TtsEngine[] = ["kokoro", "supertonic", "clone"];
 
 export interface PipelineConfig {
-  stt: { whisperSize: WhisperSize };                        // Whisper.en model size (applies on reload)
+  stt: { whisperSize: WhisperSize; language: WhisperLanguage }; // Whisper size + language (auto = detect, applies on reload); all models are multilingual
   tts: { engine: TtsEngine; voice: string; speed: number }; // TTS engine + voice id + speaking rate
   turn: { engine: TurnEngine; threshold: number; holdMs: number }; // Smart-Turn (semantic) vs silence timeout; sigmoid cutoff (0..1); max mid-thought hold before auto-send
   vad: { speechThreshold: number; redemptionMs: number };   // Silero sensitivity + trailing silence before a turn ends
 }
 
 export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
-  stt: { whisperSize: "base" },
+  stt: { whisperSize: "base", language: "auto" },
   tts: { engine: "kokoro", voice: "af_heart", speed: 1 },
   turn: { engine: "smart-turn", threshold: 0.5, holdMs: 4000 },
   vad: { speechThreshold: 0.5, redemptionMs: 550 },
@@ -36,6 +38,22 @@ export const WHISPER_SIZES: { id: WhisperSize; name: string }[] = [
   { id: "base", name: "Base — balanced, default (~290 MB)" },
   { id: "small", name: "Small — more accurate, heavier (~950 MB)" },
   { id: "large-v3-turbo", name: "Large v3 Turbo — best accuracy, multilingual (~1.6 GB)" },
+];
+
+export const WHISPER_LANGUAGES: { id: WhisperLanguage; name: string }[] = [
+  { id: "auto", name: "Auto — detect" },
+  { id: "pt", name: "Português" },
+  { id: "en", name: "English" },
+  { id: "es", name: "Español" },
+  { id: "fr", name: "Français" },
+  { id: "de", name: "Deutsch" },
+  { id: "it", name: "Italiano" },
+  { id: "ja", name: "日本語" },
+  { id: "ko", name: "한국어" },
+  { id: "zh", name: "中文" },
+  { id: "ru", name: "Русский" },
+  { id: "ar", name: "العربية" },
+  { id: "hi", name: "हिन्दी" },
 ];
 export const TURN_ENGINES: { id: TurnEngine; name: string }[] = [
   { id: "smart-turn", name: "Smart-Turn v3 — semantic end-of-turn" },
@@ -107,7 +125,10 @@ export function clampPipelineConfig(c: PipelineConfig): PipelineConfig {
   const engine = oneOf(c.tts.engine, TTS_ENGINE_IDS, d.tts.engine);
   const eng = engineOf(engine);
   return {
-    stt: { whisperSize: oneOf(c.stt.whisperSize, WHISPER_SIZE_IDS, d.stt.whisperSize) },
+    stt: {
+      whisperSize: oneOf(c.stt.whisperSize, WHISPER_SIZE_IDS, d.stt.whisperSize),
+      language: oneOf((c.stt as any)?.language, WHISPER_LANGUAGE_IDS, d.stt.language),
+    },
     tts: {
       engine,
       // The voice must belong to the selected engine; a stale/foreign id falls
@@ -129,7 +150,10 @@ export function mergePipelineConfig(partial: unknown): PipelineConfig {
   const p = (partial ?? {}) as Partial<{ [K in keyof PipelineConfig]: Partial<PipelineConfig[K]> }>;
   const d = DEFAULT_PIPELINE_CONFIG;
   return clampPipelineConfig({
-    stt: { whisperSize: oneOf(p.stt?.whisperSize, WHISPER_SIZE_IDS, d.stt.whisperSize) },
+    stt: {
+      whisperSize: oneOf(p.stt?.whisperSize, WHISPER_SIZE_IDS, d.stt.whisperSize),
+      language: oneOf((p.stt as any)?.language, WHISPER_LANGUAGE_IDS, d.stt.language),
+    },
     tts: { engine: oneOf(p.tts?.engine, TTS_ENGINE_IDS, d.tts.engine), voice: typeof p.tts?.voice === "string" ? p.tts.voice : d.tts.voice, speed: num(p.tts?.speed, d.tts.speed) },
     turn: { engine: oneOf(p.turn?.engine, ["smart-turn", "silence"], d.turn.engine), threshold: num(p.turn?.threshold, d.turn.threshold), holdMs: num(p.turn?.holdMs, d.turn.holdMs) },
     vad: { speechThreshold: num(p.vad?.speechThreshold, d.vad.speechThreshold), redemptionMs: num(p.vad?.redemptionMs, d.vad.redemptionMs) },
