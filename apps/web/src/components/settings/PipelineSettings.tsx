@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Mic, Languages, Gauge, AudioWaveform, Play, Loader2, RotateCcw, Star, Download, Check, Trash2 } from "lucide-react";
 import {
-  loadPipelineConfig, savePipelineConfig, WHISPER_SIZES, TURN_ENGINES, TTS_ENGINES,
+  loadPipelineConfig, savePipelineConfig, WHISPER_SIZES, WHISPER_LANGUAGES, TURN_ENGINES, TTS_ENGINES,
   TURN_PRESETS, activeTurnPreset, type TurnPresetValues,
   DEFAULT_PIPELINE_CONFIG, mergePipelineConfig, type PipelineConfig, type TtsEngine,
 } from "@/lib/live/pipelineConfig";
@@ -120,14 +120,21 @@ function MicStage({ cfg, update }: { cfg: PipelineConfig; update: Update }) {
 function SttStage({ cfg, update }: { cfg: PipelineConfig; update: Update }) {
   return (
     <div className="space-y-4">
-      <StageHead title="Speech-to-text" desc="Transcribes your voice on-device. Larger models are more accurate but heavier — the defaults favor modest machines; pick a bigger one if your device can carry it. Applies on the next call." />
-      <EngineCard name="Whisper" desc="OpenAI Whisper via transformers.js — runs on WebGPU with a WASM fallback." />
+      <StageHead title="Speech-to-text" desc="Transcribes your voice on-device. All models are multilingual — Auto detects the language, or pin to one. Applies on the next call." />
+      <EngineCard name="Whisper" desc="OpenAI Whisper via transformers.js — runs on WebGPU with a WASM fallback. task is always transcribe (never translate)." />
       <label className="flex flex-col gap-1.5">
         <span className="text-label text-foreground">Model size</span>
-        <select value={cfg.stt.whisperSize} onChange={(e) => update({ ...cfg, stt: { whisperSize: e.target.value as PipelineConfig["stt"]["whisperSize"] } })} className={selectClass}>
+        <select value={cfg.stt.whisperSize} onChange={(e) => update({ ...cfg, stt: { ...cfg.stt, whisperSize: e.target.value as PipelineConfig["stt"]["whisperSize"] } })} className={selectClass}>
           {WHISPER_SIZES.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
       </label>
+      <label className="flex flex-col gap-1.5">
+        <span className="text-label text-foreground">Language</span>
+        <select value={cfg.stt.language} onChange={(e) => update({ ...cfg, stt: { ...cfg.stt, language: e.target.value as PipelineConfig["stt"]["language"] } })} className={selectClass}>
+          {WHISPER_LANGUAGES.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+        </select>
+      </label>
+      <p className="-mt-2 text-caption text-faint">Auto = detect per utterance and expose the detected language in the STT result; pinned languages force that language and skip detection. Uses only multilingual Whisper models.</p>
       {!hasWebGPU() && <p className="-mt-2 text-caption text-faint">WebGPU isn&apos;t available here, so calls run the Tiny model regardless — the size choice applies when WebGPU is.</p>}
       {cfg.stt.whisperSize === "large-v3-turbo" && <p className="-mt-2 text-caption text-faint">A big download and a real GPU-memory footprint — expect the best transcription, but drop back to Small if your machine struggles.</p>}
       <ModelStatus removeKind="whisper" />

@@ -484,8 +484,11 @@ export function useLiveSession(chatId: string) {
         // Entering "listening" clears the previous answer's caption so the user
         // sees themselves (or "Listening…") the moment they start talking.
         onPhase: (p: EnginePhase) => set(p === "listening" ? { phase: p, agentCaption: "", toolStatus: "" } : { phase: p }),
-        onPartial: (text) => set({ userCaption: text, userPartial: true, warming: false }),
-        onUserText: (text) => void handleUserText(text),
+        onPartial: (text, language) => {
+          if (language) log.info("stt", `partial [${language}]: ${text.slice(0, 80)}`);
+          set({ userCaption: text, userPartial: true, warming: false });
+        },
+        onUserText: (text, language) => void handleUserText(text, language),
         // Mid-thought hold → "waiting for you… tap to send" affordance (null clears it).
         onHold: (h) => set({ holdUntil: h?.until ?? null }),
         // A chunk just STARTED voicing. Drive TWO things from it: the composer
@@ -656,7 +659,9 @@ export function useLiveSession(chatId: string) {
 
   // A completed user turn: attach the freshest camera frame, send the text, and
   // reflect the exchange in the chat store (so it renders + persists like typing).
-  const handleUserText = useCallback(async (text: string) => {
+  // `language` is the Whisper-detected language when `stt.language === "auto"` — exposed best-effort.
+  const handleUserText = useCallback(async (text: string, language?: string) => {
+    if (language) log.info("stt", `final [${language}]: ${text.slice(0, 120)}`);
     // While a permission ask or an elicitation is pending, EVERY utterance is the
     // answer to that modal — NOTHING falls through to the agent as a prompt (a stray
     // "mmm" mid-approval must never become a coding turn). The server also bounces a

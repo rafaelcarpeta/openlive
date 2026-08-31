@@ -7,5 +7,6 @@ const debugOn = () => { try { return !!localStorage.getItem("openlive-debug"); }
 export const log = {
   error: (scope: string, ...args: unknown[]) => console.error(`[${scope}]`, ...args),
   warn: (scope: string, ...args: unknown[]) => console.warn(`[${scope}]`, ...args),
+  info: (scope: string, ...args: unknown[]) => console.info(`[${scope}]`, ...args),
   debug: (scope: string, ...args: unknown[]) => { if (debugOn()) console.warn(`[${scope}]`, ...args); },
 };

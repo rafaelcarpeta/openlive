@@ -26,25 +26,19 @@ async function cachedArrayBuffer(url: string): Promise<ArrayBuffer> {
   return await (await fetch(url)).arrayBuffer();
 }
 
-// English-ONLY variants: same size/speed as the multilingual base/tiny but more
-// accurate on English (incl. product terms) — the assistant is English-only, and
-// the turn model already uses whisper-tiny.en. (.en models reject a `language`
-// arg, so the stt call passes none.)
-// English-only Whisper family; the user picks the size (Pipeline settings). WASM
-// is always tiny (small/base are too slow on CPU). ponytail: `.en` ids only —
-// the assistant is English-only and `.en` rejects a `language` arg.
+// Multilingual Whisper family — auto-detect by default (language: auto), or
+// pinned to a specific language via Pipeline settings. All models are the
+// multilingual variants (no `.en` suffix) so `language` is always accepted.
+// WASM is always tiny (small/base are too slow on CPU).
 const STT_WEBGPU: Record<string, string> = {
-  tiny: "onnx-community/whisper-tiny.en",
-  base: "onnx-community/whisper-base.en",
-  small: "onnx-community/whisper-small.en",
-  // Multilingual (no `.en` variant exists at this size) — best accuracy on capable
-  // machines; the stt call pins `language: "en"` so it never auto-detects wrong.
+  tiny: "onnx-community/whisper-tiny",
+  base: "onnx-community/whisper-base",
+  small: "onnx-community/whisper-small",
   "large-v3-turbo": "onnx-community/whisper-large-v3-turbo",
 };
-const STT_MODEL_WASM = "onnx-community/whisper-tiny.en"; // lighter on the WASM tier
+const STT_MODEL_WASM = "onnx-community/whisper-tiny"; // lighter on the WASM tier
 const sttModel = (device: Device, size: string): string =>
   device === "wasm" ? STT_MODEL_WASM : (STT_WEBGPU[size] ?? STT_WEBGPU.base!);
-const sttIsMultilingual = (model: string) => !model.endsWith(".en");
 // fp32 for the whole large model would blow past sane GPU memory — the standard
 // transformers.js split (fp16 encoder + q4 decoder) keeps it ~1.6 GB on disk.
 const sttDtype = (model: string, dtype: string) =>
@@ -59,10 +53,16 @@ const N8 = 8 * 16000; // Smart-Turn reads the last 8 s of audio
 
 type Device = "webgpu" | "wasm";
 let asr: any = null;
-let asrMultilingual = false; // multilingual models take (and need) a pinned language
+let sttLanguage: string = "auto"; // "auto" = detect, otherwise pinned (e.g. "pt", "en"); all models now multilingual
 let tts: any = null;              // Kokoro (lazy when Supertonic is the pick)
 let supertonic: Supertonic | null = null;
 let deviceTier: Device = "wasm";
+
+function sttOpts(): { language?: string; task: string } | undefined {
+  // task is always "transcribe" (never translate); language omitted = auto-detect
+  if (sttLanguage === "auto") return { task: "transcribe" };
+  return { language: sttLanguage, task: "transcribe" };
+}
 
 // One in-flight loader per engine so a mid-call engine switch never races two
 // downloads of the same weights.
@@ -112,12 +112,12 @@ self.onmessage = async (e: MessageEvent) => {
     if (msg.type === "load") {
       const device: Device = msg.device;
       deviceTier = device;
+      sttLanguage = typeof msg.language === "string" && msg.language ? msg.language : "auto";
       const dtype = device === "webgpu" ? "fp32" : "q8";
       // Tag each file's progress with the model it belongs to so the UI can show a
       // per-model breakdown ("Speech recognition", "Voice", "Turn-taking").
       const tagged = (model: "stt" | "tts" | "turn") => (p: any) => post({ type: "progress", data: { ...p, model } });
       const sttId = sttModel(device, msg.whisperSize);
-      asrMultilingual = sttIsMultilingual(sttId);
       asr = await pipeline("automatic-speech-recognition", sttId, { device, dtype: sttDtype(sttId, dtype) as never, progress_callback: tagged("stt") });
       // Load only the SELECTED TTS engine up front; the other lazy-loads on a
       // mid-call engine switch (its first sentence pays the download).
@@ -130,14 +130,21 @@ self.onmessage = async (e: MessageEvent) => {
         turnSession = await ort.InferenceSession.create(buf, { executionProviders: ["wasm"] });
       } catch (err) { console.warn("[live] Smart-Turn unavailable:", err); turnSession = null; turnProc = null; }
       // Warm up (compiles WebGPU shaders) so the first real turn isn't janky.
-      try { await asr(new Float32Array(16000), asrMultilingual ? { language: "en", task: "transcribe" } : undefined); } catch { /* */ }
+      try { await asr(new Float32Array(16000), sttOpts()); } catch { /* */ }
       try { if (supertonic) await supertonic.synthesize("Hi.", msg.ttsVoice || "M1"); else await tts.generate("Hi.", { voice: VOICE }); } catch { /* */ }
       if (turnSession && turnProc) { try { await turnComplete(new Float32Array(16000)); } catch { /* */ } }
       post({ type: "ready", turn: !!(turnSession && turnProc) });
     } else if (msg.type === "stt") {
-      const opts = asrMultilingual ? { language: "en", task: "transcribe" } : undefined;
-      const text = await serial(async () => String((await asr(msg.audio, opts))?.text ?? "").trim());
-      post({ type: "result", id: msg.id, text });
+      // Allow per-call language override (voiceEngine may forward updated config without reload); fall back to loaded sttLanguage
+      const callLang: string | undefined = typeof msg.language === "string" ? msg.language : undefined;
+      if (callLang) sttLanguage = callLang;
+      const opts = sttOpts();
+      const out: any = await serial(async () => await asr(msg.audio, opts));
+      const text = String(out?.text ?? "").trim();
+      // Expose detected language if pipeline provides it (best-effort). When auto, try pipeline's output; when pinned, echo the pin.
+      const detected = out?.language ?? out?.detected_language ?? out?.detectedLanguage ?? (sttLanguage !== "auto" ? sttLanguage : undefined);
+      const language = detected ? String(detected).toLowerCase().slice(0, 2) : (sttLanguage !== "auto" ? sttLanguage : undefined);
+      post({ type: "result", id: msg.id, text, language });
     } else if (msg.type === "tts") {
       const { audio, sampleRate } = await serial(async () => {
         // engine/voice/speed come from the user's pipeline config, read fresh per
