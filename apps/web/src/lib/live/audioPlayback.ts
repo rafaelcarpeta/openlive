@@ -21,6 +21,8 @@ export class AudioPlayer {
   private sources = new Set<AudioBufferSourceNode>();
   private timers = new Set<ReturnType<typeof setTimeout>>(); // pending onStart callbacks
   private rms = 0;
+  private pending: Array<{ f32: Float32Array; epoch: number; sampleRate: number; onStart?: () => void }> = [];
+  private static MAX_LOOKAHEAD = 0.8; // s — never schedule MediaStream more than this ahead (drift fix)
 
   private ensure(): AudioContext {
     if (!this.ctx) {
@@ -51,29 +53,47 @@ export class AudioPlayer {
   // caption can track the voice instead of racing ahead of it.
   play(f32: Float32Array, epoch: number, sampleRate = 24000, onStart?: () => void) {
     if (epoch < this.minEpoch || f32.length === 0) return;
+    this.pending.push({ f32, epoch, sampleRate, onStart });
+    this.pump();
+  }
+
+  private pump() {
+    if (!this.pending.length) return;
     const ctx = this.ensure();
+    // Limit look-ahead into MediaStreamDestination: deep queue (nextAt >> currentTime)
+    // caused Chrome's MediaStream sync to time-stretch -> progressive pitch rise.
+    if (this.nextAt > ctx.currentTime + AudioPlayer.MAX_LOOKAHEAD) return;
+    const item = this.pending.shift()!;
+    if (item.epoch < this.minEpoch) { this.pump(); return; }
     let sum = 0;
-    for (let i = 0; i < f32.length; i++) { const v = f32[i]!; sum += v * v; }
-    this.rms = Math.sqrt(sum / f32.length);
-    const buf = ctx.createBuffer(1, f32.length, sampleRate);
-    buf.getChannelData(0).set(f32); // avoids the Float32Array<ArrayBufferLike> generic mismatch
+    for (let i = 0; i < item.f32.length; i++) { const v = item.f32[i]!; sum += v * v; }
+    this.rms = Math.sqrt(sum / item.f32.length);
+    const buf = ctx.createBuffer(1, item.f32.length, item.sampleRate);
+    buf.getChannelData(0).set(item.f32);
     const src = ctx.createBufferSource();
     src.buffer = buf;
-    src.connect(this.sink!); // → MediaStreamDestination → <audio> (AEC-visible)
-    if (this.analyser) src.connect(this.analyser); // parallel tap (no audio output)
+    src.connect(this.sink!); // -> MediaStreamDestination -> <audio> (AEC-visible)
+    if (this.analyser) src.connect(this.analyser);
     const startAt = Math.max(ctx.currentTime + 0.02, this.nextAt);
     src.start(startAt);
     this.nextAt = startAt + buf.duration;
     this.sources.add(src);
-    src.onended = () => { this.sources.delete(src); if (this.sources.size === 0) this.rms = 0; };
-    if (onStart) {
-      const t = setTimeout(() => { this.timers.delete(t); onStart(); }, Math.max(0, (startAt - ctx.currentTime) * 1000));
+    src.onended = () => {
+      this.sources.delete(src);
+      if (this.sources.size === 0) this.rms = 0;
+      this.pump();
+    };
+    if (item.onStart) {
+      const t = setTimeout(() => { this.timers.delete(t); item.onStart!(); }, Math.max(0, (startAt - ctx.currentTime) * 1000));
       this.timers.add(t);
     }
+    // If still pending and room in look-ahead window, schedule immediately
+    if (this.pending.length && this.nextAt <= ctx.currentTime + AudioPlayer.MAX_LOOKAHEAD) this.pump();
   }
 
   flush(epoch: number) {
     this.minEpoch = epoch;
+    this.pending.length = 0;
     for (const s of this.sources) { try { s.stop(); } catch { /* already stopped */ } }
     this.sources.clear();
     for (const t of this.timers) clearTimeout(t); // drop pending caption updates

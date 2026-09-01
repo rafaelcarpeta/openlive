@@ -71,7 +71,8 @@ let supertonicLoading: Promise<void> | null = null;
 const taggedTts = (p: any) => post({ type: "progress", data: { ...p, model: "tts" } });
 function ensureKokoro(): Promise<void> {
   if (tts) return Promise.resolve();
-  kokoroLoading ??= KokoroTTS.from_pretrained(TTS_MODEL, { device: deviceTier, dtype: deviceTier === "webgpu" ? "fp32" : "q8", progress_callback: taggedTts })
+  // Kokoro em WASM/q8 apenas — WebGPU/fp32 gera waveform corrompida (min=-25, ruído) em RADV/WebGPU
+  kokoroLoading ??= KokoroTTS.from_pretrained(TTS_MODEL, { device: "wasm" as Device, dtype: "q8" as const, progress_callback: taggedTts })
     .then((t: any) => { tts = t; }).finally(() => { kokoroLoading = null; });
   return kokoroLoading;
 }
