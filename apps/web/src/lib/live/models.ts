@@ -230,14 +230,59 @@ async function cloneTts(text: string, voice: string, speed?: number): Promise<{ 
   }
 }
 
+let edgeFallbackToasted = false;
+async function edgeTts(text: string, voice: string, speed?: number, signal?: AbortSignal): Promise<{ audio: Float32Array; sampleRate: number } | null> {
+  try {
+    const res = await fetch("/api/voice/edge/tts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text, voice, speed }),
+      signal,
+    });
+    if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? `HTTP ${res.status}`);
+    const encoded = await res.arrayBuffer();
+    const ctx = new AudioContext();
+    try {
+      const decoded = await ctx.decodeAudioData(encoded.slice(0));
+      const mono = new Float32Array(decoded.length);
+      if (decoded.numberOfChannels === 1) mono.set(decoded.getChannelData(0));
+      else {
+        for (let channel = 0; channel < decoded.numberOfChannels; channel++) {
+          const data = decoded.getChannelData(channel);
+          for (let i = 0; i < data.length; i++) mono[i] = mono[i]! + data[i]! / decoded.numberOfChannels;
+        }
+      }
+      return { audio: mono, sampleRate: decoded.sampleRate };
+    } finally {
+      void ctx.close();
+    }
+  } catch (e) {
+    if ((e as Error)?.name === "AbortError") throw e;
+    if (!edgeFallbackToasted) {
+      edgeFallbackToasted = true;
+      const { toast } = await import("@/lib/toast");
+      toast("Microsoft Edge voice unavailable — using Kokoro for this session.");
+    }
+    const { log } = await import("@/lib/log");
+    log.error("tts", "Edge synth failed, falling back:", e);
+    return null;
+  }
+}
+
 /** Synthesize a sentence → Float32 PCM + sample rate. Voice/speed come from the
  *  user's pipeline config; a cloned voice routes to the local agent service and
  *  falls back to Kokoro if unavailable. */
-export async function tts(text: string, opts?: { engine?: string; voice?: string; speed?: number }): Promise<{ audio: Float32Array; sampleRate: number }> {
+export async function tts(text: string, opts?: { engine?: string; voice?: string; speed?: number; signal?: AbortSignal }): Promise<{ audio: Float32Array; sampleRate: number }> {
   if (opts?.engine === "clone") {
     const cloned = opts.voice ? await cloneTts(text, opts.voice, opts.speed) : null;
     if (cloned) return cloned;
     opts = { engine: "kokoro", speed: opts.speed }; // worker default voice
+  }
+  if (opts?.engine === "edge") {
+    const remote = opts.voice ? await edgeTts(text, opts.voice, opts.speed, opts.signal) : null;
+    if (remote) return remote;
+    if (!modelsReady()) await loadModels(() => {});
+    opts = { engine: "kokoro", speed: opts.speed }; // local fallback
   }
   const m = await call<{ audio: Float32Array; sampleRate: number }>({ type: "tts", text, engine: opts?.engine, voice: opts?.voice, speed: opts?.speed });
   return { audio: m.audio, sampleRate: m.sampleRate };
@@ -252,4 +297,3 @@ export async function turnComplete(audio: Float32Array, threshold?: number): Pro
   const m = await call<{ complete: boolean }>({ type: "turn", audio, threshold });
   return m.complete;
 }
-

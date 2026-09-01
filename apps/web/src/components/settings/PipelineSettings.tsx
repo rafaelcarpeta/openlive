@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Mic, Languages, Gauge, AudioWaveform, Play, Loader2, RotateCcw, Star, Download, Check, Trash2 } from "lucide-react";
 import {
@@ -19,7 +19,7 @@ const STAGES = [
   { id: "mic", label: "VAD", sub: "Silero", icon: Mic },
   { id: "stt", label: "Speech-to-text", sub: "Whisper", icon: Languages },
   { id: "turn", label: "Turn-taking", sub: "Smart-Turn", icon: Gauge },
-  { id: "tts", label: "Text-to-speech", sub: "Kokoro · Supertonic", icon: AudioWaveform },
+  { id: "tts", label: "Text-to-speech", sub: "Local · Edge", icon: AudioWaveform },
 ] as const;
 type StageId = (typeof STAGES)[number]["id"];
 
@@ -193,7 +193,7 @@ function TtsStage({ cfg, update }: { cfg: PipelineConfig; update: Update }) {
   const preview = async () => {
     setBusy(true);
     try {
-      if (!modelsReady()) await loadModels(() => {});
+      if (cfg.tts.engine !== "edge" && !modelsReady()) await loadModels(() => {});
       const { audio, sampleRate } = await tts(SAMPLE, { engine: cfg.tts.engine, voice: cfg.tts.voice, speed: cfg.tts.speed });
       const ctx = new AudioContext();
       const buf = ctx.createBuffer(1, audio.length, sampleRate);
@@ -206,23 +206,29 @@ function TtsStage({ cfg, update }: { cfg: PipelineConfig; update: Update }) {
   const engine = TTS_ENGINES.find((e) => e.id === cfg.tts.engine) ?? TTS_ENGINES[0]!;
   // Switching engines swaps the voice list too — mergePipelineConfig snaps the
   // voice to the new engine's default.
-  const setEngine = (id: TtsEngine) => update(mergePipelineConfig({ ...cfg, tts: { ...cfg.tts, engine: id } }));
+  const setEngine = (id: TtsEngine) => {
+    const next = TTS_ENGINES.find((e) => e.id === id) ?? TTS_ENGINES[0]!;
+    update(mergePipelineConfig({ ...cfg, tts: { ...cfg.tts, engine: id, voice: next.defaultVoice } }));
+  };
   const accents = [...new Set(engine.voices.map((v) => v.accent))];
   return (
     <div className="space-y-4">
-      <StageHead title="Text-to-speech" desc="Speaks replies back to you on-device. Engine and voice apply to the next reply — switching engines downloads that engine's weights once. Speaking speed lives in General → Voice & speech." />
-      <div className="grid grid-cols-3 gap-2">
+      <StageHead title="Text-to-speech" desc={cfg.tts.engine === "edge"
+        ? "Microsoft Edge synthesizes each reply online. Only the reply text is sent to Microsoft; microphone audio stays on this device."
+        : "Speaks replies back to you on-device. Engine and voice apply to the next reply. Speaking speed lives in General → Voice & speech."} />
+      <div className="grid grid-cols-2 gap-2">
         {TTS_ENGINES.map((e) => (
           <button key={e.id} onClick={() => setEngine(e.id)}
             className={cn("rounded-xl border p-3 text-left transition",
               cfg.tts.engine === e.id ? "border-accent/50 bg-accent/[0.07]" : "border-transparent bg-card shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-pop)]")}>
             <div className="flex items-center gap-2 text-body font-semibold text-foreground">
-              {e.id === "kokoro" ? "Kokoro" : e.id === "supertonic" ? "Supertonic" : "Your voice"}
+              {e.id === "kokoro" ? "Kokoro" : e.id === "supertonic" ? "Supertonic" : e.id === "edge" ? "Microsoft Edge" : "Your voice"}
               {cfg.tts.engine === e.id && <span className="flex items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 text-micro font-medium text-accent"><Star className="size-2.5" /> Active</span>}
             </div>
             <p className="mt-1 text-caption leading-relaxed text-muted-foreground">
               {e.id === "kokoro" ? "82M StyleTTS2 — natural, 28 English voices (~82 MB)."
                 : e.id === "supertonic" ? "Supertone's 66M flow-matching TTS — fastest first-word, 10 voices (~400 MB, OpenRAIL-M)."
+                : e.id === "edge" ? "Online natural voices in 100+ languages — no API key required."
                 : "Cloned from a short recording — record and manage in the Clone Voice tab (runs locally)."}
             </p>
           </button>
@@ -230,6 +236,8 @@ function TtsStage({ cfg, update }: { cfg: PipelineConfig; update: Update }) {
       </div>
       {cfg.tts.engine === "clone" ? (
         <CloneVoicePicker cfg={cfg} update={update} />
+      ) : cfg.tts.engine === "edge" ? (
+        <EdgeVoicePicker cfg={cfg} update={update} onPreview={preview} previewBusy={busy} />
       ) : (
         <label className="flex flex-col gap-1.5">
           <span className="text-label text-foreground">Voice</span>
@@ -248,8 +256,62 @@ function TtsStage({ cfg, update }: { cfg: PipelineConfig; update: Update }) {
           </div>
         </label>
       )}
-      <ModelStatus removeKind={cfg.tts.engine === "supertonic" ? "supertonic" : cfg.tts.engine === "kokoro" ? "kokoro" : undefined} />
+      {cfg.tts.engine !== "edge" && <ModelStatus removeKind={cfg.tts.engine === "supertonic" ? "supertonic" : cfg.tts.engine === "kokoro" ? "kokoro" : undefined} />}
     </div>
+  );
+}
+
+interface EdgeVoice { id: string; name: string; locale: string; gender: string }
+
+function EdgeVoicePicker({ cfg, update, onPreview, previewBusy }: {
+  cfg: PipelineConfig;
+  update: Update;
+  onPreview: () => Promise<void>;
+  previewBusy: boolean;
+}) {
+  const { data: voices = [], isLoading, isError, refetch } = useQuery<EdgeVoice[]>({
+    queryKey: ["edge-voices"],
+    queryFn: async () => {
+      const res = await fetch("/api/voice/edge/voices");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json() as EdgeVoice[];
+    },
+    staleTime: 6 * 60 * 60 * 1000,
+  });
+  useEffect(() => {
+    if (!voices.length || voices.some((v) => v.id === cfg.tts.voice)) return;
+    const fallback = voices.find((v) => v.id === "pt-BR-FranciscaNeural") ?? voices[0]!;
+    update({ ...cfg, tts: { ...cfg.tts, voice: fallback.id } });
+  }, [voices, cfg, update]);
+  if (isLoading) return <p className="flex items-center gap-2 text-label text-muted-foreground"><Loader2 className="size-3.5 animate-spin" /> Loading Microsoft voices…</p>;
+  if (isError) return (
+    <div className="flex items-center gap-2 text-label text-danger">
+      Microsoft voices are unavailable.
+      <button onClick={() => void refetch()} className="underline underline-offset-2">Try again</button>
+    </div>
+  );
+  const locales = [...new Set(voices.map((v) => v.locale))];
+  return (
+    <>
+      <label className="flex flex-col gap-1.5">
+        <span className="text-label text-foreground">Voice</span>
+        <div className="flex items-center gap-2">
+          <select value={cfg.tts.voice} onChange={(e) => update({ ...cfg, tts: { ...cfg.tts, voice: e.target.value } })} className={selectClass}>
+            {!voices.some((v) => v.id === cfg.tts.voice) && <option value={cfg.tts.voice}>Select a Microsoft voice…</option>}
+            {locales.map((locale) => (
+              <optgroup key={locale} label={locale === "pt-BR" ? "Português (Brasil)" : locale}>
+                {voices.filter((v) => v.locale === locale).map((v) => <option key={v.id} value={v.id}>{v.name} · {v.gender}</option>)}
+              </optgroup>
+            ))}
+          </select>
+          <button onClick={() => void onPreview()} disabled={previewBusy} title="Play a Microsoft Edge voice sample"
+            className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-foreground px-3 text-label font-medium text-background transition hover:opacity-90 disabled:opacity-40">
+            {previewBusy ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />} Preview
+          </button>
+        </div>
+      </label>
+      <p className="-mt-2 text-caption text-faint">Requires internet. Reply text is sent to Microsoft Edge Read Aloud for synthesis; no API key is used.</p>
+    </>
   );
 }
 
@@ -292,7 +354,7 @@ export function PipelineSettings() {
     <div className="flex flex-col gap-6">
       <div>
         <p className="text-label leading-relaxed text-muted-foreground">
-          Your whole voice pipeline runs on-device — tune each stage below. Nothing here leaves your machine.
+          Tune each stage of the voice pipeline below. Local engines stay on-device; online engines clearly identify what they send.
         </p>
         <div className="mt-3 grid grid-cols-4 gap-1 rounded-xl bg-card p-1 shadow-[var(--shadow-card)]">
           {STAGES.map((s) => (

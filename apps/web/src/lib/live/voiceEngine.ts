@@ -64,6 +64,7 @@ export class VoiceEngine {
   private noiseFloor = 0.002;                     // learned room ambient (see onFrame/gate)
   private epoch = 0;                              // bumped on barge-in; stales TTS + audio
   private ttsChain: Promise<void> = Promise.resolve();
+  private ttsAbort: AbortController | null = null;
   private speakingStartAt = 0;
   private turnSentAt = 0;                         // perf: when the final user text went out
   private spokenText = "";                         // what the agent has actually VOICED this reply (for barge-in cutoff)
@@ -382,7 +383,11 @@ export class VoiceEngine {
       if (!spoken) return;
       // Read voice/speed per sentence so a settings change applies to the next reply.
       const ttsCfg = loadPipelineConfig().tts;
-      const { audio, sampleRate } = await tts(spoken, { engine: ttsCfg.engine, voice: ttsCfg.voice, speed: ttsCfg.speed });
+      const abort = new AbortController();
+      this.ttsAbort = abort;
+      const { audio, sampleRate } = await tts(spoken, {
+        engine: ttsCfg.engine, voice: ttsCfg.voice, speed: ttsCfg.speed, signal: abort.signal,
+      }).finally(() => { if (this.ttsAbort === abort) this.ttsAbort = null; });
       if (this.epoch !== epoch) return;
       const durationMs = (audio.length / sampleRate) * 1000; // how long THIS chunk voices — paces the caption reveal
       if (this.phase !== "speaking") {
@@ -420,6 +425,8 @@ export class VoiceEngine {
   // acceptingReply=false: the turn CONTINUES after the modal answer, so its follow-up
   // speech must still be voiced (that flag is barge-in only).
   private hush() {
+    this.ttsAbort?.abort();
+    this.ttsAbort = null;
     this.epoch++;
     this.player.flush(this.epoch);
     this.chunker.flush();
@@ -459,6 +466,8 @@ export class VoiceEngine {
   agentBands(n = 5): number[] { return this.player.agentBands(n); }
 
   stop() {
+    this.ttsAbort?.abort();
+    this.ttsAbort = null;
     this.clearHold();
     this.ptt = false;
     this.epoch++;

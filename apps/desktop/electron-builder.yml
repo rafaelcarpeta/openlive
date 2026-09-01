@@ -11,7 +11,7 @@ directories:
 # v<version> and attaches the installers; you publish it from the Releases page.
 publish:
   provider: github
-  owner: katipally
+  owner: rafaelcarpeta
   repo: openlive
 
 # Only the shell code goes in the asar; the servers ride along as unpacked

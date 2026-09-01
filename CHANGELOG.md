@@ -2,7 +2,24 @@
 
 All notable changes to OpenLive are recorded here. The newest version is on top.
 Releases before 0.1.9 predate this file — see the
-[GitHub releases](https://github.com/katipally/openlive/releases) for those.
+[GitHub releases](https://github.com/rafaelcarpeta/openlive/releases) for those.
+
+## [0.3.0] - 2026-09-01
+
+### Added
+- **Microsoft Edge TTS sem API key.** O pipeline agora oferece o catálogo online
+  do Edge Read Aloud com 322 vozes, prioriza português do Brasil e usa Francisca
+  como padrão. A tela de Pipeline permite trocar a voz e ouvir um preview real.
+- **Integração resiliente com o fluxo de voz.** O MP3 remoto é decodificado para o
+  `AudioPlayer` existente, barge-in cancela a síntese em andamento e falhas usam
+  Kokoro como fallback sem travar a conversa.
+
+### Changed
+- **Feed de atualização do fork.** Novos builds consultam e publicam releases em
+  `rafaelcarpeta/openlive`, incluindo `latest-linux.yml` para o auto-updater.
+- **Privacidade explícita.** A interface e a documentação informam que Edge TTS é
+  opcional e envia apenas o texto da resposta à Microsoft; o áudio do microfone
+  continua local.
 
 ## [0.2.9] - 2026-09-01
 
@@ -254,6 +271,6 @@ Releases before 0.1.9 predate this file — see the
 - Snapshot model defaults refreshed to current IDs (e.g. DeepSeek V4, Grok 4.5),
   preferring fast vision-capable models for the voice + camera loop.
 
-[0.2.1]: https://github.com/katipally/openlive/releases/tag/v0.2.1
-[0.2.0]: https://github.com/katipally/openlive/releases/tag/v0.2.0
-[0.1.9]: https://github.com/katipally/openlive/releases/tag/v0.1.9
+[0.2.1]: https://github.com/rafaelcarpeta/openlive/releases/tag/v0.2.1
+[0.2.0]: https://github.com/rafaelcarpeta/openlive/releases/tag/v0.2.0
+[0.1.9]: https://github.com/rafaelcarpeta/openlive/releases/tag/v0.1.9

@@ -11,16 +11,16 @@ Bring your own model, or talk to the coding agents you already use, with the who
 voice loop running on your own machine. An open alternative to ElevenLabs Agents,
 Gemini Live, and OpenAI Realtime.
 
-[![Release](https://img.shields.io/github/v/release/katipally/openlive?color=2f6fed)](https://github.com/katipally/openlive/releases/latest)
-[![CI](https://github.com/katipally/openlive/actions/workflows/ci.yml/badge.svg)](https://github.com/katipally/openlive/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/github/license/katipally/openlive?color=2f6fed)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/rafaelcarpeta/openlive?color=2f6fed)](https://github.com/rafaelcarpeta/openlive/releases/latest)
+[![CI](https://github.com/rafaelcarpeta/openlive/actions/workflows/ci.yml/badge.svg)](https://github.com/rafaelcarpeta/openlive/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/github/license/rafaelcarpeta/openlive?color=2f6fed)](LICENSE)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-2f6fed.svg)](CONTRIBUTING.md)
 
-[![Download for macOS](https://img.shields.io/badge/Download-macOS-0b0b0c?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/katipally/openlive/releases/latest)
+[![Download for macOS](https://img.shields.io/badge/Download-macOS-0b0b0c?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/rafaelcarpeta/openlive/releases/latest)
 &nbsp;
-[![Download for Windows](https://img.shields.io/badge/Download-Windows-0b0b0c?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik0zIDVsNy0xdjdIM3ptMCAxNGw3IDF2LTdIM3ptOC0xNXY4aDEwVjNsLTEwIDF6bTAgMTZsMTAgMVYxM0gxMXoiLz48L3N2Zz4=&logoColor=white)](https://github.com/katipally/openlive/releases/latest)
+[![Download for Windows](https://img.shields.io/badge/Download-Windows-0b0b0c?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik0zIDVsNy0xdjdIM3ptMCAxNGw3IDF2LTdIM3ptOC0xNXY4aDEwVjNsLTEwIDF6bTAgMTZsMTAgMVYxM0gxMXoiLz48L3N2Zz4=&logoColor=white)](https://github.com/rafaelcarpeta/openlive/releases/latest)
 &nbsp;
-[![Download for Linux](https://img.shields.io/badge/Download-Linux-0b0b0c?style=for-the-badge&logo=linux&logoColor=white)](https://github.com/katipally/openlive/releases/latest)
+[![Download for Linux](https://img.shields.io/badge/Download-Linux-0b0b0c?style=for-the-badge&logo=linux&logoColor=white)](https://github.com/rafaelcarpeta/openlive/releases/latest)
 
 </div>
 
@@ -38,8 +38,9 @@ the model turn, streaming text-to-speech, and barge-in so you can interrupt. The
 camera and screen on top. Hosted platforms rent you that pipeline by the minute and
 run it on their cloud.
 
-OpenLive is that pipeline, open and local. The listening, the speaking, and the
-watching all run on-device (WebGPU). You bring the brain, and any brain works:
+OpenLive is that pipeline, open and local by default. Listening and watching run
+on-device; speaking can use a local engine or the optional Microsoft Edge online
+voice catalog. You bring the brain, and any brain works:
 
 - **A model you have a key for.** Anthropic, OpenAI, Google, xAI, DeepSeek, Groq,
   Ollama (fully local), and a dozen more. No per-minute audio fees; you pay only
@@ -51,9 +52,10 @@ watching all run on-device (WebGPU). You bring the brain, and any brain works:
   asks by voice.
 
 Whichever brain you pick, OpenLive is the same thing it has always been: the ears,
-mouth, and eyes around it. Nothing you say leaves the machine. The only thing that
-goes out is the final transcript (plus camera or screen frames if you turn them on),
-to whatever brain you picked.
+mouth, and eyes around it. Microphone audio stays on the machine. The final
+transcript (plus camera or screen frames if you turn them on) goes to the brain you
+picked; when Microsoft Edge TTS is selected, reply text also goes to Microsoft's
+Read Aloud service for synthesis.
 
 An honest note on architecture: OpenLive is a cascaded pipeline (speech to text to
 model to speech), not a full-duplex speech-to-speech model like GPT-Live. That's a
@@ -65,9 +67,10 @@ possible.
 
 The core, the ears / mouth / eyes:
 
-- **On-device voice loop.** Silero VAD, Whisper STT, Smart-Turn end-of-turn, and
-  your pick of two TTS engines: Kokoro (28 voices, light) or Supertonic (10 voices,
-  44.1 kHz). All of it runs in the app on WebGPU.
+- **Local-first voice loop.** Silero VAD, Whisper STT, Smart-Turn end-of-turn, and
+  your choice of Kokoro (28 voices), Supertonic (10 voices), a locally cloned
+  voice, or Microsoft Edge's online natural voices. The local engines run in the
+  app; Edge TTS needs internet, sends only reply text, and requires no API key.
 - **Speak as yourself.** Settings → Clone Voice records 5 to 30 seconds of you
   (with a seekable listen-back before anything is saved) and your assistant speaks
   in your voice from then on. Zero-shot cloning (ZipVoice, Apache-2.0) running
@@ -104,8 +107,9 @@ The integrations that serve it:
   you work, with a menu-bar tray and notifications to close the loop.
 - **A transcript you can use.** Agent replies render as markdown with copy buttons
   on code blocks, and the whole conversation exports to a Markdown file.
-- **Private by design.** Audio never uploads. API keys are encrypted at rest
-  (AES-256-GCM) and only the last four digits are ever shown.
+- **Private by design.** Microphone and generated audio never upload. Edge TTS is
+  explicitly opt-in and sends reply text to Microsoft for synthesis. API keys are
+  encrypted at rest (AES-256-GCM) and only the last four digits are ever shown.
 
 ## Screenshots
 
@@ -119,9 +123,10 @@ The integrations that serve it:
 
 ## Why on-device voice matters
 
-The listening and speaking never leave your computer. The only thing that goes out
-is the text turn to the brain you picked, the same call you would make from any app.
-No audio uploads, no per-minute meter, no lock-in.
+With a local TTS engine selected, listening and speaking stay on your computer. The
+text turn still goes to the brain you picked, the same call you would make from any
+app. Edge TTS is the explicit online exception: it sends reply text to Microsoft,
+never microphone audio. There is no separate audio upload or per-minute meter.
 
 That also skips the separate speech-to-text, text-to-speech, and real-time-audio
 fees hosted platforms charge on top. You still pay your normal model and vision API
@@ -133,7 +138,7 @@ at all; it runs under the login you already have.
 ```
 mic ─▶ VAD ─▶ streaming STT ─▶ end-of-turn ─▶ your AI ──────────▶ streaming TTS ─▶ speaker
      (Silero)  (Whisper)        (Smart-Turn)  (BYO model, or a     (Kokoro / Supertonic /
-                                    ▲          coding agent over    your cloned voice)
+                                    ▲          coding agent over    cloned voice / Edge)
                 camera / screen ────┘          ACP on local stdio)
                 frames (vision)
 ```
@@ -146,11 +151,12 @@ sentence by sentence while the reply is still being written.
 ## Get started
 
 **Just use it:** grab the installer from the
-[latest release](https://github.com/katipally/openlive/releases/latest), open the app,
+[latest release](https://github.com/rafaelcarpeta/openlive/releases/latest), open the app,
 paste a model key (or pick the coding agent you already use — install/sign in from
-Settings → Agents if needed), and start a call. The voice models download from
+Settings → Agents if needed), and start a call. Local voice models download from
 Hugging Face the first time you talk — roughly 200 MB with Kokoro, more with
-Supertonic or a bigger Whisper — and are cached after that.
+Supertonic or a bigger Whisper — and are cached after that. Microsoft Edge voices
+stream online and do not download model weights.
 
 **Build it from source:**
 
@@ -167,10 +173,10 @@ You can also run it in a browser during development with `pnpm dev`, then open
 ```
 apps/desktop     Electron shell: spawns the local servers, media perms, window,
                  mini mode, tray + notifications
-apps/web         Next.js UI + the on-device voice engine (src/lib/live/*) + /api routes
+apps/web         Next.js UI + local/remote voice engine (src/lib/live/*) + /api routes
                  (agents install/auth, history discovery, settings)
 services/agent   Hono + ws: the /live WebSocket, the ACP agent driver (acp-agent.ts,
-                 supervisor.ts), voice cloning (voice/*), the built-in provider turn loop
+                 supervisor.ts), voice cloning + Edge TTS, built-in provider turn loop
 packages/shared  the agent registry (single source of agent identity), wire protocol,
                  shared types
 packages/harness provider-neutral model adapters, live model listing, cost/effort

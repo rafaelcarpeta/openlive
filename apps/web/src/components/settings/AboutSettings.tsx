@@ -8,8 +8,8 @@ import { Section } from "./Section";
 export function AboutSettings() {
   const version = useAppVersion();
   const links = [
-    { href: "https://github.com/katipally/openlive", label: "GitHub repository", icon: Github },
-    { href: "https://github.com/katipally/openlive/releases", label: "Releases & changelog", icon: ExternalLink },
+    { href: "https://github.com/rafaelcarpeta/openlive", label: "GitHub repository", icon: Github },
+    { href: "https://github.com/rafaelcarpeta/openlive/releases", label: "Releases & changelog", icon: ExternalLink },
   ];
   return (
     <div className="flex flex-col gap-7">

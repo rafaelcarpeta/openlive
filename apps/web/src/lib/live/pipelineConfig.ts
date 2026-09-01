@@ -10,8 +10,8 @@ export const WHISPER_SIZE_IDS: readonly WhisperSize[] = ["tiny", "base", "small"
 export type WhisperLanguage = "auto" | "pt" | "en" | "es" | "fr" | "de" | "it" | "ja" | "ko" | "zh" | "ru" | "ar" | "hi";
 export const WHISPER_LANGUAGE_IDS: readonly WhisperLanguage[] = ["auto", "pt", "en", "es", "fr", "de", "it", "ja", "ko", "zh", "ru", "ar", "hi"];
 export type TurnEngine = "smart-turn" | "silence";
-export type TtsEngine = "kokoro" | "supertonic" | "clone";
-export const TTS_ENGINE_IDS: readonly TtsEngine[] = ["kokoro", "supertonic", "clone"];
+export type TtsEngine = "kokoro" | "supertonic" | "clone" | "edge";
+export const TTS_ENGINE_IDS: readonly TtsEngine[] = ["kokoro", "supertonic", "clone", "edge"];
 
 export interface PipelineConfig {
   stt: { whisperSize: WhisperSize; language: WhisperLanguage }; // Whisper size + language (auto = detect, applies on reload); all models are multilingual
@@ -76,7 +76,7 @@ export function activeTurnPreset(c: PipelineConfig): "relaxed" | "balanced" | "s
   return hit?.id ?? "custom";
 }
 
-export interface VoiceOption { id: string; name: string; accent: "American" | "British"; gender: "Female" | "Male" }
+export interface VoiceOption { id: string; name: string; accent: string; gender: string }
 
 // The 28 English Kokoro voices shipped in kokoro-js 1.2.1 (its `.voices` getter).
 // ponytail: hardcoded — stable for this model version; update the list if kokoro-js
@@ -111,6 +111,9 @@ export const TTS_ENGINES: { id: TtsEngine; name: string; voices: VoiceOption[]; 
   // (ZipVoice via sherpa-onnx); `voice` holds a profile id, and the runtime
   // falls back to Kokoro if the model/profile is missing.
   { id: "clone", name: "Your voice — cloned in Voice Studio (~208 MB)", voices: [], defaultVoice: "" },
+  // Dynamic catalog fetched from the local agent service. The selected voice id
+  // is validated there immediately before synthesis.
+  { id: "edge", name: "Microsoft Edge — online natural voices", voices: [], defaultVoice: "pt-BR-FranciscaNeural" },
 ];
 const engineOf = (id: TtsEngine) => TTS_ENGINES.find((e) => e.id === id)!;
 
@@ -134,7 +137,7 @@ export function clampPipelineConfig(c: PipelineConfig): PipelineConfig {
       // The voice must belong to the selected engine; a stale/foreign id falls
       // back to that engine's default (e.g. after an engine switch). Clone
       // voices are profile ids (dynamic) — validated at synth time instead.
-      voice: engine === "clone" || eng.voices.some((v) => v.id === c.tts.voice) ? c.tts.voice : eng.defaultVoice,
+      voice: engine === "clone" || engine === "edge" || eng.voices.some((v) => v.id === c.tts.voice) ? c.tts.voice : eng.defaultVoice,
       speed: clamp(c.tts.speed, 0.5, 2),
     },
     turn: { engine: oneOf(c.turn.engine, ["smart-turn", "silence"], d.turn.engine), threshold: clamp(c.turn.threshold, 0, 1), holdMs: clamp(Math.round(num(c.turn.holdMs, d.turn.holdMs)), 1000, 8000) },

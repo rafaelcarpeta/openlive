@@ -15,6 +15,8 @@ allowBuilds:
   # Squirrel.Windows binary fetcher — unused (we ship NSIS), skip its build script.
   electron-winstaller: false
   esbuild: true
+  # Ships compiled JS; its preinstall only enforces pnpm and is unnecessary here.
+  msedge-tts: false
   onnxruntime-node: true
   protobufjs: true
   sharp: true

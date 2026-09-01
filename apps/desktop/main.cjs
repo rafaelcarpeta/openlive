@@ -667,7 +667,7 @@ function buildMenu() {
     { role: "viewMenu" },
     { role: "windowMenu" },
     { role: "help", submenu: [
-      { label: "OpenLive on GitHub", click: () => shell.openExternal("https://github.com/katipally/openlive") },
+      { label: "OpenLive on GitHub", click: () => shell.openExternal("https://github.com/rafaelcarpeta/openlive") },
       ...(isMac ? [] : [{ label: "Check for Updates…", click: checkForUpdatesNow },
                         { label: "Settings", accelerator: "CmdOrCtrl+,", click: openSettings },
                         { type: "separator" }, { role: "about", label: "About OpenLive" }]),

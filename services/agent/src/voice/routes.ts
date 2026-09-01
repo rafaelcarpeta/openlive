@@ -8,6 +8,7 @@ import { extract } from "tar";
 import unbzip2 from "unbzip2-stream";
 import { listVoiceProfiles, createVoiceProfile, deleteVoiceProfile, renameVoiceProfile } from "@openlive/db";
 import { modelInstalled, modelDiskBytes, synthesize, unloadEngine, VOICE_MODEL_DIR, VOICE_PROFILE_DIR } from "./engine.js";
+import { listEdgeVoices, synthesizeEdge } from "./edge.js";
 import { log } from "../log.js";
 
 // Voice Studio REST surface, mounted at /voice (behind the same shared-secret
@@ -24,6 +25,42 @@ const DOWNLOAD_BYTES = 163_320_194; // 109,162,785 (tar.bz2) + 54,157,409 (vocod
 let downloading = false;
 
 export const voiceRoutes = new Hono();
+
+// Microsoft Edge Read Aloud: remote, keyless TTS. Only reply text is sent to
+// Microsoft's service; microphone audio never enters this path.
+voiceRoutes.get("/edge/voices", async (c) => {
+  try {
+    return c.json(await listEdgeVoices());
+  } catch (e) {
+    log.error("edge-tts", "voice catalog:", e);
+    return c.json({ error: String((e as Error)?.message ?? e) }, 502);
+  }
+});
+
+voiceRoutes.post("/edge/tts", async (c) => {
+  const body = await c.req.json().catch(() => null) as { text?: string; voice?: string; speed?: number } | null;
+  const text = body?.text?.trim();
+  if (!text) return c.json({ error: "text required" }, 400);
+  if (text.length > 4_000) return c.json({ error: "text too long" }, 413);
+  const voices = await listEdgeVoices().catch((e) => {
+    log.error("edge-tts", "voice catalog:", e);
+    return null;
+  });
+  if (!voices) return c.json({ error: "voice catalog unavailable" }, 502);
+  const voice = voices.find((v) => v.id === body?.voice);
+  if (!voice) return c.json({ error: "unknown voice" }, 400);
+  const speed = Math.min(2, Math.max(0.5, Number(body?.speed) || 1));
+  try {
+    const audio = await synthesizeEdge(text, voice, speed, c.req.raw.signal);
+    return new Response(audio, {
+      headers: { "Content-Type": "audio/mpeg", "Cache-Control": "no-store" },
+    });
+  } catch (e) {
+    if ((e as Error)?.name === "AbortError") return new Response(null, { status: 499 });
+    log.error("edge-tts", "synthesis:", e);
+    return c.json({ error: String((e as Error)?.message ?? e) }, 502);
+  }
+});
 
 voiceRoutes.get("/model", (c) =>
   c.json({ installed: modelInstalled(), downloading, downloadBytes: DOWNLOAD_BYTES, diskBytes: modelDiskBytes() }));

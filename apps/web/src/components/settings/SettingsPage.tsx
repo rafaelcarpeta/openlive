@@ -19,7 +19,7 @@ import { SpotlightTour } from "@/components/SpotlightTour";
 const SECTIONS = [
   { id: "general", label: "General", sub: "Appearance, speech & startup", icon: Settings2, Comp: GeneralSettings },
   { id: "models", label: "Models", sub: "Provider, model & vision", icon: SlidersHorizontal, Comp: ModelsSettings },
-  { id: "pipeline", label: "Pipeline", sub: "On-device speech pipeline", icon: AudioWaveform, Comp: PipelineSettings },
+  { id: "pipeline", label: "Pipeline", sub: "Speech pipeline & voices", icon: AudioWaveform, Comp: PipelineSettings },
   { id: "voices", label: "Clone Voice", sub: "Clone & manage your voices", icon: Mic, Comp: VoicesSettings },
   { id: "agents", label: "Agents", sub: "Install, sign in & visibility", icon: Bot, Comp: AgentsSettings },
   { id: "about", label: "About", sub: "Version & links", icon: Info, Comp: AboutSettings },
@@ -157,7 +157,7 @@ export function SettingsPage() {
       </div>
 
       <SpotlightTour id="settings" steps={[
-        { target: "settings-nav", title: "Six focused tabs", body: "General (appearance, style & speech), Models for the built-in assistant, the on-device voice Pipeline, Clone Voice to speak as yourself, agent install & sign-in under Agents, and About." },
+        { target: "settings-nav", title: "Six focused tabs", body: "General (appearance, style & speech), Models for the built-in assistant, the configurable voice Pipeline, Clone Voice to speak as yourself, agent install & sign-in under Agents, and About." },
       ]} />
     </div>
   );

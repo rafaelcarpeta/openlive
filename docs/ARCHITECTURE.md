@@ -4,9 +4,11 @@ How OpenLive fits together, and the few decisions that shape everything else.
 
 ## The one big idea: thick client, thin server
 
-The whole voice loop runs **on your machine, in the browser renderer**. The local
-agent server is a thin driver in front of the brain you picked — an external coding
-agent over ACP, or a chat-model provider. No audio ever crosses the wire.
+The voice loop runs **on your machine, in the browser renderer** by default. The
+local agent server is a thin driver in front of the brain you picked — an external
+coding agent over ACP, or a chat-model provider. Microphone audio never crosses the
+wire. Microsoft Edge TTS is an optional remote synthesis path that sends reply text
+to Microsoft's Read Aloud service and receives encoded speech.
 
 ```
 ┌──────────────────────────────── your machine ────────────────────────────────┐
@@ -16,7 +18,7 @@ agent over ACP, or a chat-model provider. No audio ever crosses the wire.
 │  (Silero)(Whisper)(Smart-Turn)  ├─ text ───▶ │   ├─ AcpAgent ── stdio ──▶ your coding agent
 │                                 │  +frames   │   │  (supervised)   (Claude Code / Codex / …)
 │  speaker ← TTS ← sentences ─────┘◀─ reply ───┘   └─ or: provider turn loop   │
-│           (Kokoro)                 (SSE text)         (BYO model key)        │
+│     (local TTS / Edge online)      (SSE text)         (BYO model key)        │
 │    ▲ camera / screen frames ────────┘                                        │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -81,14 +83,24 @@ One turn, end to end:
 3. **End-of-turn** (Smart-Turn v3) decides you actually *finished*, not just paused.
 4. The final text (plus the freshest camera/screen frame) goes out over `/live`.
 5. The reply streams back as text; **TTS** (Kokoro or Supertonic in the renderer,
-   or a cloned voice — see below) voices it sentence by sentence so speaking starts
-   before the full answer exists.
+   a local cloned voice, or Microsoft Edge online) voices it sentence by sentence
+   so speaking starts before the full answer exists.
 6. **Barge-in**: start talking and it stops mid-word — the client aborts the turn
    (ACP `session/cancel` for agents) and the transcript keeps only what was spoken.
 
 The renderer models run on **WebGPU via transformers.js**. They download once
 (roughly 200 MB with Kokoro, more with Supertonic or a bigger Whisper; cached)
 and the worker stays warm for the tab's life.
+
+## Microsoft Edge TTS (`services/agent/src/voice/edge.ts`)
+
+Edge TTS is the optional online engine. The renderer sends one reply sentence to
+the loopback `/api/voice/edge/tts` proxy; the agent service validates the voice,
+escapes SSML, and uses Edge Read Aloud without an API key. It returns MP3, which
+the renderer decodes to Float32 PCM for the existing `AudioPlayer`. The dynamic
+voice catalog is cached for six hours with `pt-BR` sorted first. Barge-in aborts
+the request and closes its WebSocket; failures fall back to Kokoro once per
+session. No microphone audio enters this path.
 
 ## Voice cloning (`services/agent/src/voice/`)
 

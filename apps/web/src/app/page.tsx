@@ -107,7 +107,7 @@ export default function Home() {
           </div>
 
           <footer className="absolute inset-x-0 bottom-4 flex items-center justify-center text-caption text-faint">
-            <a href="https://github.com/katipally/openlive/releases" target="_blank" rel="noreferrer" className="transition hover:text-muted-foreground">
+            <a href="https://github.com/rafaelcarpeta/openlive/releases" target="_blank" rel="noreferrer" className="transition hover:text-muted-foreground">
               {appVersion ? `v${appVersion}` : "dev"}
             </a>
           </footer>
