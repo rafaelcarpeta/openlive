@@ -4,6 +4,11 @@ All notable changes to OpenLive are recorded here. The newest version is on top.
 Releases before 0.1.9 predate this file — see the
 [GitHub releases](https://github.com/katipally/openlive/releases) for those.
 
+## [0.2.9] - 2026-09-01
+
+### Fixed
+- **Ollama: qwen3 reconhecido como reasoning model.** A heurística `isReasoningModel` (`packages/harness/src/effort.ts:49`) não incluía `qwen3`, então modelos `qwen3`, `qwen3:8b`, `qwen3:32b` e afins (inclui `qwen3.5:0.8b` por substring) eram tratados como não-reasoning — nenhum `reasoningEffort` era enviado e o seletor de esforço ficava desabilitado. Agora `qwen3` entra na regex, habilitando `auto → minimal` e `low/medium/high` em `live/turn-runner.ts:117` e `live/worker.ts:50` via `openai-responses.ts:57`.
+
 ## [0.2.7] - 2026-08-27
 
 ### Fixed
