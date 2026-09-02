@@ -2,17 +2,15 @@
 // running clock. Barge-in = flush(epoch): stop everything scheduled and ignore
 // any audio tagged below the new epoch (kills the ~1s already-buffered tail).
 //
-// CRITICAL for barge-in on speakers: we do NOT play to AudioContext.destination.
-// Chrome's echo canceller (AEC3) is blind to Web-Audio output, so the agent's
-// voice would leak into the mic uncancelled and break barge-in. Instead we route
-// through a MediaStreamDestination into a hidden <audio> element — which AEC3
-// DOES reference — so the agent's own voice is cancelled from the mic input.
+// Playback stays on the AudioContext clock all the way to the output. Routing
+// through MediaStreamDestination + a hidden <audio> element introduces a second
+// clock; Chromium may then time-stretch the stream to keep both clocks in sync,
+// causing audible speed and pitch drift. Speaker barge-in remains protected by
+// VoiceEngine's playback-aware echo gate.
 import { octaveBands } from "./spectrum";
 
 export class AudioPlayer {
   private ctx: AudioContext | null = null;
-  private sink: MediaStreamAudioDestinationNode | null = null;
-  private el: HTMLAudioElement | null = null;
   private analyser: AnalyserNode | null = null;   // taps the output for LIVE amplitude
   private tap: Float32Array | null = null;         // reusable time-domain buffer
   private freq: Uint8Array | null = null;          // reusable frequency buffer (spectrum)
@@ -21,13 +19,10 @@ export class AudioPlayer {
   private sources = new Set<AudioBufferSourceNode>();
   private timers = new Set<ReturnType<typeof setTimeout>>(); // pending onStart callbacks
   private rms = 0;
-  private pending: Array<{ f32: Float32Array; epoch: number; sampleRate: number; onStart?: () => void }> = [];
-  private static MAX_LOOKAHEAD = 0.8; // s — never schedule MediaStream more than this ahead (drift fix)
 
   private ensure(): AudioContext {
     if (!this.ctx) {
       this.ctx = new AudioContext();
-      this.sink = this.ctx.createMediaStreamDestination();
       // A parallel analyser tap so level() reflects the REAL, moment-to-moment
       // voice amplitude (drives a lively orb) instead of a static per-chunk RMS.
       this.analyser = this.ctx.createAnalyser();
@@ -35,14 +30,6 @@ export class AudioPlayer {
       this.analyser.smoothingTimeConstant = 0.6; // steadier spectrum bars
       this.tap = new Float32Array(this.analyser.fftSize);
       this.freq = new Uint8Array(this.analyser.frequencyBinCount);
-      const el = document.createElement("audio");
-      el.autoplay = true;
-      el.setAttribute("playsinline", "");
-      el.srcObject = this.sink.stream; // <audio> playback → AEC references it
-      el.style.display = "none";
-      document.body.appendChild(el);
-      void el.play().catch(() => {});
-      this.el = el;
     }
     if (this.ctx.state === "suspended") void this.ctx.resume();
     return this.ctx;
@@ -53,26 +40,15 @@ export class AudioPlayer {
   // caption can track the voice instead of racing ahead of it.
   play(f32: Float32Array, epoch: number, sampleRate = 24000, onStart?: () => void) {
     if (epoch < this.minEpoch || f32.length === 0) return;
-    this.pending.push({ f32, epoch, sampleRate, onStart });
-    this.pump();
-  }
-
-  private pump() {
-    if (!this.pending.length) return;
     const ctx = this.ensure();
-    // Limit look-ahead into MediaStreamDestination: deep queue (nextAt >> currentTime)
-    // caused Chrome's MediaStream sync to time-stretch -> progressive pitch rise.
-    if (this.nextAt > ctx.currentTime + AudioPlayer.MAX_LOOKAHEAD) return;
-    const item = this.pending.shift()!;
-    if (item.epoch < this.minEpoch) { this.pump(); return; }
     let sum = 0;
-    for (let i = 0; i < item.f32.length; i++) { const v = item.f32[i]!; sum += v * v; }
-    this.rms = Math.sqrt(sum / item.f32.length);
-    const buf = ctx.createBuffer(1, item.f32.length, item.sampleRate);
-    buf.getChannelData(0).set(item.f32);
+    for (let i = 0; i < f32.length; i++) { const v = f32[i]!; sum += v * v; }
+    this.rms = Math.sqrt(sum / f32.length);
+    const buf = ctx.createBuffer(1, f32.length, sampleRate);
+    buf.getChannelData(0).set(f32);
     const src = ctx.createBufferSource();
     src.buffer = buf;
-    src.connect(this.sink!); // -> MediaStreamDestination -> <audio> (AEC-visible)
+    src.connect(ctx.destination);
     if (this.analyser) src.connect(this.analyser);
     const startAt = Math.max(ctx.currentTime + 0.02, this.nextAt);
     src.start(startAt);
@@ -81,19 +57,15 @@ export class AudioPlayer {
     src.onended = () => {
       this.sources.delete(src);
       if (this.sources.size === 0) this.rms = 0;
-      this.pump();
     };
-    if (item.onStart) {
-      const t = setTimeout(() => { this.timers.delete(t); item.onStart!(); }, Math.max(0, (startAt - ctx.currentTime) * 1000));
+    if (onStart) {
+      const t = setTimeout(() => { this.timers.delete(t); onStart(); }, Math.max(0, (startAt - ctx.currentTime) * 1000));
       this.timers.add(t);
     }
-    // If still pending and room in look-ahead window, schedule immediately
-    if (this.pending.length && this.nextAt <= ctx.currentTime + AudioPlayer.MAX_LOOKAHEAD) this.pump();
   }
 
   flush(epoch: number) {
     this.minEpoch = epoch;
-    this.pending.length = 0;
     for (const s of this.sources) { try { s.stop(); } catch { /* already stopped */ } }
     this.sources.clear();
     for (const t of this.timers) clearTimeout(t); // drop pending caption updates
@@ -123,8 +95,7 @@ export class AudioPlayer {
   resume() { this.ensure(); }
   close() {
     this.flush(Number.MAX_SAFE_INTEGER);
-    try { this.el?.pause(); this.el?.remove(); } catch { /* */ }
     try { void this.ctx?.close(); } catch { /* */ }
-    this.el = null; this.sink = null; this.ctx = null; this.analyser = null; this.tap = null;
+    this.ctx = null; this.analyser = null; this.tap = null;
   }
 }

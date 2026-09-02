@@ -4,6 +4,14 @@ All notable changes to OpenLive are recorded here. The newest version is on top.
 Releases before 0.1.9 predate this file — see the
 [GitHub releases](https://github.com/rafaelcarpeta/openlive/releases) for those.
 
+## [0.3.1] - 2026-09-01
+
+### Fixed
+- **Reprodução TTS estável.** O áudio agora permanece no relógio único do
+  `AudioContext`, eliminando a aceleração, desaceleração e mudança anormal de
+  entonação causadas pela sincronização intermediária via `MediaStream`. A fila,
+  as legendas, o analyser e o barge-in continuam preservados.
+
 ## [0.3.0] - 2026-09-01
 
 ### Added
